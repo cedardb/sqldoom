@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+venv/
+
+# The IWADs: doomu.wad is the retail Ultimate Doom and must never be
+# published; doom1.wad is the freely redistributable shareware release.
+*.wad
+
+# A running local demo's state
+db/
+db.old/
+logs/
+local_demo/
+env
+players.txt
+guests.txt
+spectator.txt
+Caddyfile
+
+# Recorded demos. A demo is an input stream replayed against the simulation,
+# so it only stays valid while gameplay does; freeze one with
+# scripts/gen_demo_data.py when it is worth keeping.
+sql/loader/demo_data.sql
+
+# Working notes and drafts that are not part of the project
+TODO.md
+post.md
+
+# The blog post's figures and snippets and their generators live with the post.
+docs/
+scripts/figures/
+
+# Machine-specific settings for scripts/local_demo.sh
+local_demo.env

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOOM in SQL — deathmatch</title>
+<style>
+  :root { color-scheme: dark; --bg: #121014; --panel: #1d1a20; --line: #3a3340; --text: #e8e2d9; --dim: #9a9089; --red: #c2352c; --ok: #7fb069; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  header { width: 100%; max-width: 1280px; display: flex; align-items: baseline; gap: 16px; padding: 14px 16px 6px; }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .08em; color: var(--red); text-transform: uppercase; }
+  header span { color: var(--dim); }
+  #connect { width: 100%; max-width: 1280px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) auto; gap: 8px 12px; align-items: end; padding: 10px 16px; background: var(--panel); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  #connect label { display: flex; flex-direction: column; gap: 4px; color: var(--dim); font-size: 12px; }
+  #connect input, #connect select { background: #0d0b0f; color: var(--text); border: 1px solid var(--line); padding: 7px 8px; font: inherit; border-radius: 3px; }
+  #connect button { background: var(--red); color: #fff; border: 0; padding: 9px 18px; font: inherit; font-weight: 700; letter-spacing: .06em; border-radius: 3px; cursor: pointer; }
+  #connect button:disabled { opacity: .5; cursor: default; }
+  #account-toggle { color: var(--dim); font-size: 12px; align-self: center; white-space: nowrap; }
+  #status { width: 100%; max-width: 1280px; padding: 8px 16px; color: var(--ok); min-height: 1.5em; }
+  #status.bad { color: #f0a090; }
+  #stage { position: relative; width: min(100vw, 1280px); aspect-ratio: 16 / 10; background: #000; border: 1px solid var(--line); outline: none; }
+  #stage.live { border-color: var(--red); }
+  canvas { width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+  /* The queue's plan view. Its own canvas at the element's real size, not the
+     game's 320x200 upscaled: the cloud console draws the same picture as SVG
+     while you are idle, and the handover should not change resolution. */
+  #lobby-map { position: absolute; inset: 0; width: 100%; height: 100%; background: #000; }
+  #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(60, 0, 0, .35); pointer-events: none; }
+  #overlay.queue { align-items: flex-end; background: linear-gradient(to top, rgba(10, 8, 12, .9) 0%, rgba(10, 8, 12, 0) 38%); }
+  #overlay.queue #overlay-text { font-size: clamp(12px, 1.8vw, 20px); padding-bottom: 14px; }
+  #overlay-text { white-space: pre-line; font-size: clamp(16px, 3vw, 34px); font-weight: 700; letter-spacing: .12em; color: #ffd9c4; text-shadow: 0 0 12px #000, 0 2px 0 #000; text-align: center; padding: 0 20px; }
+  #scoreboard { position: absolute; top: 8%; left: 50%; transform: translateX(-50%); min-width: 60%; background: rgba(10, 8, 12, .88); border: 1px solid var(--line); padding: 14px 22px; }
+  #scoreboard h2 { margin: 0 0 10px; font-size: 16px; letter-spacing: .14em; color: var(--red); text-align: center; }
+  #scoreboard .row { display: grid; grid-template-columns: 2em 1fr auto; gap: 12px; padding: 4px 0; border-top: 1px solid #2a2530; }
+  #scoreboard .slot { color: var(--dim); }
+  #scoreboard .state { color: var(--dim); }
+  #scoreboard em { color: var(--dim); }
+  #stats { width: 100%; max-width: 1280px; padding: 6px 16px; color: var(--dim); min-height: 1.5em; }
+  #help { width: 100%; max-width: 1280px; padding: 0 16px 16px; color: var(--dim); font-size: 12px; }
+  #help kbd { background: #26212b; border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; color: var(--text); }
+  footer { margin-top: auto; padding: 10px 16px; color: #665e60; font-size: 12px; }
+  /* ?embed=1: inside another page's iframe. That page has the title, the
+     story and the help; here only the form, the screen and the two status
+     lines, sized so the screen fits the frame's height. */
+  /* ?embed=1 inside another page's iframe: only the screen. The host page
+     draws the form, the status and the stats in its own style (app.js tells
+     it what they say over postMessage), so nothing here competes with it. */
+  body.embed { min-height: 100vh; overflow: hidden; background: #000; }
+  body.embed header, body.embed footer, body.embed #help, body.embed #connect, body.embed #status, body.embed #stats { display: none; }
+  body.embed #stage { width: 100vw; height: 100vh; aspect-ratio: auto; border: 0; }
+  body.embed canvas { object-fit: contain; }
+  /* The host shows the scoreboard next to the screen, from the spectator's SQL. */
+  body.embed #scoreboard { display: none; }
+</style>
+</head>
+<body>
+<header><h1>DOOM in SQL</h1><span>deathmatch</span></header>
+<form id="connect" autocomplete="on">
+  <label id="target-field" hidden>server<select id="target" name="target"></select></label>
+  <label id="nick-field">your name on the frag board<input id="nick" name="nickname" maxlength="12" placeholder="up to 12 letters"></label>
+  <label id="user-field" hidden>username<input id="user" name="username" autocomplete="username" placeholder="doom_player1"></label>
+  <label id="password-field" hidden>password<input id="password" name="password" type="password" autocomplete="current-password"></label>
+  <button id="go" type="submit">PLAY</button>
+  <a id="account-toggle" href="#">sign in with a player account</a>
+</form>
+<div id="status"></div>
+<div id="stage" tabindex="0">
+  <canvas id="screen" width="320" height="200"></canvas>
+  <canvas id="lobby-map" hidden></canvas>
+  <div id="overlay" hidden><div id="overlay-text"></div></div>
+  <div id="scoreboard" hidden></div>
+</div>
+<div id="stats"></div>
+<div id="help" hidden>
+  <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>←</kbd><kbd>→</kbd> or mouse turn · <kbd>Ctrl</kbd> or left click fire ·
+  <kbd>Shift</kbd> run · <kbd>Space</kbd> use · <kbd>1</kbd>–<kbd>7</kbd> / wheel weapons · <kbd>Esc</kbd> release the mouse<br>
+  <kbd>Tab</kbd> automap (<kbd>F</kbd> follow, <kbd>G</kbd> grid, <kbd>+</kbd><kbd>−</kbd> or wheel zoom, arrows pan) · <kbd>Shift</kbd>+<kbd>Tab</kbd> frags
+</div>
+<footer>Four slots. A slot frees a few seconds after its player leaves. Items respawn, maps rotate on a timer, and your slot follows you to the next map.</footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>
